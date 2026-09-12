@@ -50,6 +50,11 @@
             <option value="all">全部语系</option>
             <option v-for="f in LANGUAGE_FAMILIES" :key="f.id" :value="f.id">{{ f.name }}</option>
           </select>
+          <button @click="onAddToCompare" :disabled="!store.filteredCognates.length"
+            class="px-3 py-1.5 text-sm rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500 text-white whitespace-nowrap">
+            加入比较清单 ({{ store.filteredCognates.length }})
+          </button>
+          <span v-if="compareHint" class="self-center text-xs whitespace-nowrap" :class="compareHintOk ? 'text-green-400' : 'text-amber-400'">{{ compareHint }}</span>
         </div>
         <div class="overflow-x-auto max-h-64 overflow-y-auto">
           <table class="w-full text-xs">
@@ -80,18 +85,78 @@
           </table>
         </div>
       </div>
+      <div v-if="store.compareList.length" class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-slate-400">比较清单 · 差异对照</h3>
+          <button @click="store.clearCompare()" class="text-xs text-slate-500 hover:text-red-400">清空清单</button>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-3">
+          <span v-for="(s, i) in store.compareList" :key="s.id" class="flex items-center gap-2 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs">
+            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: SNAP_COLORS[i % SNAP_COLORS.length] }"></span>
+            <span class="text-slate-300">{{ s.label }}</span>
+            <span class="text-slate-500">{{ s.items.length }} 条<template v-if="store.compareList.length >= 2"> · 独有 {{ store.compareDiff.uniqueCounts[i] }}</template></span>
+            <button @click="store.removeFromCompare(s.id)" class="text-slate-500 hover:text-red-400 leading-none">×</button>
+          </span>
+        </div>
+        <template v-if="store.compareList.length >= 2">
+          <div class="flex items-center gap-4 text-xs text-slate-400 mb-2">
+            <span>并集 {{ store.compareDiff.total }} 个词根 · 共有 {{ store.compareDiff.common }} 个 · 差异 {{ store.compareDiff.total - store.compareDiff.common }} 个</span>
+            <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" v-model="onlyDiff" class="accent-cyan-500" /> 只看差异行</label>
+          </div>
+          <div class="overflow-x-auto max-h-64 overflow-y-auto">
+            <table class="w-full text-xs">
+              <thead class="sticky top-0 bg-slate-700">
+                <tr>
+                  <th class="px-2 py-2 text-left text-slate-300">词根</th>
+                  <th class="px-2 py-2 text-left text-slate-300">含义</th>
+                  <th v-for="(s, i) in store.compareList" :key="s.id" class="px-2 py-2 text-left" :style="{ color: SNAP_COLORS[i % SNAP_COLORS.length] }">{{ s.label }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in diffRows" :key="row.root" class="border-t border-slate-700" :class="row.inAll ? '' : 'bg-amber-900/10'">
+                  <td class="px-2 py-1.5 font-mono text-slate-200 font-bold">{{ row.root }}</td>
+                  <td class="px-2 py-1.5 text-slate-400">{{ row.meaning }}</td>
+                  <td v-for="(cell, i) in row.cells" :key="i" class="px-2 py-1.5">
+                    <span v-if="cell" class="text-green-400">✓</span>
+                    <span v-else class="text-slate-600">—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+        <p v-else class="text-xs text-slate-500">再调整筛选条件并「加入比较清单」，即可集中对照多次筛选的差异。</p>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import * as d3 from 'd3'
 import { useEtymologyStore, LANGUAGE_FAMILIES } from './store/etymology'
 
 const store = useEtymologyStore()
 const svgRef = ref<SVGSVGElement | null>(null)
 const COLORS: Record<string, string> = { ie: '#3b82f6', st: '#22c55e', aa: '#f59e0b', ural: '#8b5cf6' }
+const SNAP_COLORS = ['#22d3ee', '#f59e0b', '#a78bfa', '#34d399', '#f472b6', '#f87171']
+
+const compareHint = ref('')
+const compareHintOk = ref(true)
+let hintTimer: ReturnType<typeof setTimeout> | undefined
+function onAddToCompare() {
+  const r = store.addToCompare()
+  compareHintOk.value = r === 'added'
+  compareHint.value = r === 'added' ? '已加入比较清单' : r === 'duplicate' ? '相同筛选已在清单中' : '当前筛选无结果'
+  clearTimeout(hintTimer)
+  hintTimer = setTimeout(() => { compareHint.value = '' }, 2000)
+}
+
+const onlyDiff = ref(false)
+const diffRows = computed(() => {
+  const rows = store.compareDiff.rows
+  return onlyDiff.value ? rows.filter(r => !r.inAll) : rows
+})
 
 function drawGraph() {
   if (!svgRef.value) return
